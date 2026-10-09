@@ -24,7 +24,8 @@ pub async fn run_sudo(input: SudoRunInput, self_path: &str) -> Result<String> {
         ));
     }
 
-    let sudo_bin = which_executable("sudo").ok_or_else(|| anyhow!("sudo not found on PATH"))?;
+    // Patch lokal: path absolut. PATH pemanggil (mis. ~/.bun/bin) tidak boleh memilih binary sudo.
+    let sudo_bin = PathBuf::from("/usr/bin/sudo");
 
     let timeout_secs = match input.timeout_seconds {
         Some(0) | None => DEFAULT_TIMEOUT_SECONDS,
@@ -33,7 +34,8 @@ pub async fn run_sudo(input: SudoRunInput, self_path: &str) -> Result<String> {
     let timeout_dur = Duration::from_secs(timeout_secs);
 
     let mut cmd = Command::new(&sudo_bin);
-    cmd.arg("-A").arg("--").args(&input.argv);
+    // Patch lokal: -k memaksa dialog password baru setiap panggilan (tanpa jendela timestamp).
+    cmd.arg("-A").arg("-k").arg("--").args(&input.argv);
     cmd.env("SUDO_ASKPASS", self_path);
     cmd.env(ROLE_ENV, "askpass");
     cmd.env(REASON_ENV, &input.reason);
@@ -127,27 +129,4 @@ fn truncate(bytes: &[u8]) -> String {
     let head = String::from_utf8_lossy(&bytes[..MAX_OUTPUT_BYTES]).into_owned();
     let omitted = bytes.len() - MAX_OUTPUT_BYTES;
     format!("{head}\n... [truncated, {omitted} bytes omitted]")
-}
-
-fn which_executable(bin: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(bin);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = std::fs::metadata(&candidate) {
-                if meta.is_file() && meta.permissions().mode() & 0o111 != 0 {
-                    return Some(candidate);
-                }
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    None
 }

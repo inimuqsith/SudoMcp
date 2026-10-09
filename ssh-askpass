@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""ssh-askpass — dialog password GUI standalone untuk dipakai sebagai SUDO_ASKPASS/SSH_ASKPASS.
+
+argv[1] = prompt (dari `sudo -p` atau ssh). Password ditulis ke stdout hanya bila
+user menekan OK. Exit 0 = password tersedia, exit 1 = dibatalkan, exit 2 = gagal
+menyiapkan dialog.
+
+Dipasang root-owned di /usr/local/bin/ssh-askpass supaya tidak bisa diganti oleh
+proses milik user. Helper ini tidak menyimpan apa pun; password hanya lewat
+stdout (pipe) ke pemanggil.
+"""
+import sys
+
+
+def fail(msg, code=2):
+    print(f"ssh-askpass: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def main():
+    prompt = sys.argv[1] if len(sys.argv) > 1 else "Password: "
+    try:
+        import gi
+    except Exception as exc:  # pragma: no cover
+        fail(f"PyGObject tidak tersedia: {exc}")
+
+    state = {"pw": None}
+
+    try:
+        gi.require_version("Gtk", "4.0")
+        from gi.repository import Gtk
+        gtk4 = True
+    except Exception:
+        try:
+            gi.require_version("Gtk", "3.0")
+            from gi.repository import Gtk
+            gtk4 = False
+        except Exception as exc:  # pragma: no cover
+            fail(f"Gtk 4/3 tidak tersedia: {exc}")
+
+    if gtk4:
+        def on_activate(app):
+            win = Gtk.ApplicationWindow(application=app, title="sudo — password")
+            win.set_default_size(480, -1)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                          margin_top=16, margin_bottom=16, margin_start=16, margin_end=16)
+            box.append(Gtk.Label(label=prompt, wrap=True, xalign=0))
+            entry = Gtk.Entry(visibility=False, activates_default=True)
+            box.append(entry)
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
+                          halign=Gtk.Align.END)
+            cancel = Gtk.Button(label="Cancel")
+            ok = Gtk.Button(label="OK")
+            row.append(cancel)
+            row.append(ok)
+            box.append(row)
+            win.set_child(box)
+
+            def do_ok(*_):
+                state["pw"] = entry.get_text()
+                app.quit()
+
+            entry.connect("activate", do_ok)
+            ok.connect("clicked", do_ok)
+            cancel.connect("clicked", lambda *_: app.quit())
+            win.connect("close-request", lambda *_: (app.quit(), False)[1])
+            win.present()
+            entry.grab_focus()
+
+        app = Gtk.Application()          # tanpa application_id: hindari single-instance D-Bus
+        app.connect("activate", on_activate)
+        app.run([])
+    else:
+        win = Gtk.Window(title="sudo — password")
+        win.set_default_size(480, -1)
+        win.set_border_width(16)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.pack_start(Gtk.Label(label=prompt, wrap=True, xalign=0), False, False, 0)
+        entry = Gtk.Entry(visibility=False, activates_default=True)
+        box.pack_start(entry, False, False, 0)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        cancel = Gtk.Button(label="Cancel")
+        ok = Gtk.Button(label="OK")
+        row.pack_end(ok, False, False, 0)
+        row.pack_end(cancel, False, False, 0)
+        box.pack_start(row, False, False, 0)
+        win.add(box)
+
+        def do_ok3(*_):
+            state["pw"] = entry.get_text()
+            Gtk.main_quit()
+
+        entry.connect("activate", do_ok3)
+        ok.connect("clicked", do_ok3)
+        cancel.connect("clicked", lambda *_: Gtk.main_quit())
+        win.connect("destroy", lambda *_: Gtk.main_quit())
+        win.show_all()
+        entry.grab_focus()
+        Gtk.main()
+
+    pw = state["pw"]
+    if pw is None:
+        raise SystemExit(1)              # dibatalkan
+    sys.stdout.write(pw + "\n")
+    sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()

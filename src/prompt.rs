@@ -42,45 +42,12 @@ fn prompt_darwin(message: &str) -> Result<Vec<u8>> {
 
 #[cfg(target_os = "linux")]
 fn prompt_linux(message: &str) -> Result<Vec<u8>> {
-    // Try GUI askpass programs in priority order. Each prints the password on
-    // stdout and exits 0 on success, non-zero on cancel.
-    let zenity_text = format!("--text={message}");
-    let candidates: [(&str, Vec<&str>); 4] = [
-        ("ssh-askpass", vec![message]),
-        ("ksshaskpass", vec![message]),
-        (
-            "zenity",
-            vec!["--password", "--title=Claude Code sudo-mcp", &zenity_text],
-        ),
-        (
-            "kdialog",
-            vec!["--title", "Claude Code sudo-mcp", "--password", message],
-        ),
-    ];
-
-    for (bin, args) in candidates {
-        if which(bin).is_none() {
-            continue;
-        }
-        let output = Command::new(bin).args(&args).output()?;
-        if !output.status.success() {
-            return Err(anyhow!("{bin} exited {}", output.status));
-        }
-        return Ok(output.stdout);
+    // Patch lokal: helper absolut (ssh-askpass root-owned, dialog GTK lewat PyGObject).
+    // Tidak ada pencarian $PATH, jadi tidak ada jalur substitusi helper.
+    const ASKPASS: &str = "/usr/local/bin/ssh-askpass";
+    let output = Command::new(ASKPASS).arg(message).output()?;
+    if !output.status.success() {
+        return Err(anyhow!("{ASKPASS} exited {}", output.status));
     }
-    Err(anyhow!(
-        "no askpass program found (install ssh-askpass, zenity, or kdialog)"
-    ))
-}
-
-#[cfg(target_os = "linux")]
-fn which(bin: &str) -> Option<std::path::PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(bin);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    Ok(output.stdout)
 }
